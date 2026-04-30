@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+.env
+chroma_db/
+*.pyc
+human_review_queue.txt
