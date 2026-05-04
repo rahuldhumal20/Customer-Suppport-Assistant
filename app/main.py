@@ -1,12 +1,11 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-
+from pydantic import BaseModel
 from app.embedder import build_vector_store
 from app.graph import app_graph
 from app.memory import clear_memory
 
-app = FastAPI()
+app = FastAPI(title="RAG Customer Support API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,21 +30,17 @@ def home():
 
 @app.post("/ask")
 def ask_question(data: QueryRequest):
-    result = app_graph.invoke(
-        {
-            "query": data.query,
-            "context": "",
-            "route": "",
-            "response": "",
-        }
-    )
+    result = app_graph.invoke({
+        "query": data.query, "context": "",
+        "route": "",         "response": "",
+        "source": "",        "score": 0.0, "confidence": 0.0
+    })
     return {
-        "query": data.query,
-        "answer": result["response"],
-        "confidence": result.get("confidence", 0),
-        "source": result.get("source", "")
+        "query":      data.query,
+        "answer":     result["response"],
+        "confidence": result.get("confidence", 0.0),
+        "source":     result.get("source", "")
     }
-
 
 
 @app.post("/reset")

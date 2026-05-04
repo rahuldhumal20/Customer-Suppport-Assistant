@@ -1,9 +1,7 @@
 from typing import TypedDict
 from langgraph.graph import StateGraph
-
 from langchain_groq import ChatGroq
-
-from app.config import GROQ_API_KEY, MODEL_NAME
+from app.config import GROQ_API_KEY, MODEL_NAME , SIMILARITY_THRESHOLD
 from app.retriever import retrieve_context
 from app.hitl import escalate_to_human
 from app.memory import get_memory_context, save_to_memory
@@ -13,6 +11,16 @@ llm = ChatGroq(
     model_name=MODEL_NAME
 )
 
+# ── Phrases that signal the LLM is uncertain ──────
+
+uncertainty_phrases = [
+    "not confident","context does not",
+    "does not provide","no information",
+    "cannot answer","not sure",
+    "don't have","i don't know",
+    "unable to answer",
+]
+
 class AgentState(TypedDict):
     query: str
     context: str
@@ -20,46 +28,46 @@ class AgentState(TypedDict):
     response: str
     source: str
     score: float
+    confidence: float
 
+# ── Node 1: Process ───────────────────────────────
 
-def process_node(state):
+def process_node(state: AgentState) -> dict:
 
-    query = state["query"].lower()
+    query  = state["query"].lower()
+
     result = retrieve_context(query)
-    context = result["context"]
-    score = result["score"]
-    source = result.get("source", "Unknown")
 
-    if "password" in query or "account" in query:
+    context, score, source = result["context"], result["score"], result["source"]
+ 
+    if   any(k in query for k in ("password", "account", "login")):
         intent = "account"
-    elif "order" in query or "shipping" in query:
+    elif any(k in query for k in ("order", "shipping", "arrive", "delivery")):
         intent = "order"
-    elif "refund" in query or "return" in query or "cancel" in query:
+    elif any(k in query for k in ("refund", "return", "cancel")):
         intent = "refund"
-    elif "payment" in query or "deducted" in query:
+    elif any(k in query for k in ("payment", "deducted", "billing")):
         intent = "payment"
-    elif "arrive" in query or "delivery" in query:
-        intent = "order"
-    else:
-        intent = "unknown"
-
+    else: intent = "unknown"
+ 
     memory = get_memory_context()
 
-    if intent == "unknown" and memory.strip() == "":
-        return {"query": query, "context": context, "route": "hitl", "response": ""}
-
-    if score > 1.8 and memory.strip() == "":
-        return {"query": query, "context": context, "route": "hitl", "response": ""}
-
+    route  = "hitl" if (
+        (intent == "unknown" and not memory.strip()) or
+        (score > SIMILARITY_THRESHOLD and not memory.strip())
+    ) else "answer"
+ 
     return {
         "query": query,
         "context": context,
-        "route": "answer",
+        "route": route,
         "response": "",
         "source": source,
-        "score": score
+        "score": score,
+        "confidence": 0.0
     }
 
+# ── Node 2: Answer ────────────────────────────────
 
 def answer_node(state):
 
@@ -88,18 +96,7 @@ def answer_node(state):
     try:
         result = llm.invoke(prompt)
 
-        # If the LLM admits it doesn't know, escalate to HITL and write the txt
-        uncertainty_phrases = [
-            "not confident",
-            "context does not",
-            "does not provide",
-            "no information",
-            "cannot answer",
-            "not sure",
-            "don't have",
-            "i don't know",
-            "unable to answer",
-        ]
+        
         if any(phrase in result.content.lower() for phrase in uncertainty_phrases):
             escalation_response = escalate_to_human(state["query"])
             return {
@@ -125,6 +122,8 @@ def answer_node(state):
     except Exception as e:
         print(f"LLM Error: {e}")
         return {"response": "We are experiencing technical difficulties. Please try again later."}
+
+# ── Node 3: HITL ──────────────────────────────────
 
 
 def hitl_node(state):
