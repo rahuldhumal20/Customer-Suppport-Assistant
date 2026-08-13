@@ -214,7 +214,7 @@ rag-customer-support/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/rag-customer-support.git
+git clone https://github.com/your-username/Customer-Suppport-Assistant.git
 cd rag-customer-support
 ```
 
